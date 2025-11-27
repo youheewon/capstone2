@@ -1,68 +1,224 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
-    <title>간단한 지도 표시하기</title>
-    <script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91"></script>
-</head>
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+    <title>공장 ↔ 고객 경로 표시</title>
 
-<body>
-    <div id="map" style="width:100%;height:400px;"></div>
-    <script type="text/javascript" src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91&callback=initMap"></script>
-    <script type="text/javascript">
-        var map = null;
-
-        function initMap() {
-            var map = new naver.maps.Map('map', {
-                center: new naver.maps.LatLng(37.015349560501, 127.25072406298),
-                zoom: 15,
-                mapTypeControl: true,
-                mapTypeControlOptions: {
-                    style: naver.maps.MapTypeControlStyle.DROPDOWN
-                }
-            });
-            
-            var tileGridLayer = new naver.maps.Layer('tileGrid', {
-                name: "TileGrid",
-                minZoom: -1,
-                maxZoom: 14,
-                tileSize: new naver.maps.Size(256, 256),
-                getTile: function(x, y, z) {
-                    var div = $('<div class="tilegrid">('+ [z, x, y].join(', ')+')</div>');
-            
-                    return div[0];
-                }
-            });
-            
-            //tileGridLayer.setMap(map);
-            
-            var tileSize = map.getMapType().tileSize.width;
-            var projection = map.getProjection();
-            var center = map.getCenter();
-            var zoom = map.getZoom();
-            var centerPixel = projection.fromCoordToPoint(center);
-            var xPixel = Math.floor(projection.scaleUp(centerPixel.x, zoom));
-            var yPixel = Math.floor(projection.scaleUp(centerPixel.y, zoom));
-            var xIndex = Math.floor(xPixel / tileSize);
-            var yIndex = Math.floor(yPixel / tileSize);
-            
-            var marker = new naver.maps.Marker({
-                map: map,
-                position: map.getCenter(),
-            });
-            
-            var infoWindow = new naver.maps.InfoWindow({
-                content: '<div style="width:150px;text-align:center;padding:10px;">(xIndex, yIndex) <b>('+ xIndex + ', ' + yIndex +')</b></div>'
-            });
-            
-            // infoWindow.open(map, marker);
-            // map = new naver.maps.Map('map', {
-            //     center: new naver.maps.LatLng(37.015349560501, 127.25072406298), //농심 주소
-            //     zoom: 10
-            // });
-        }
+    <!-- JS 지도 + 지오코더 로드 -->
+    <script type="text/javascript"
+            src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91&submodules=geocoder&callback=initMap">
     </script>
+
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 좌측 상단 고정 정보 박스 */
+        #info-panel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 9999;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 12px;
+            line-height: 1.4;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+            max-width: 280px;
+        }
+        #info-panel .title {
+            font-weight: bold;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+        #info-panel .label {
+            font-weight: bold;
+        }
+        #info-panel .value {
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+
+<!-- 지도 영역 -->
+<div id="map"></div>
+
+<!-- 좌측 상단 정보창 -->
+<div id="info-panel">
+    <div class="title">Delivery Info</div>
+    <div><span class="label">Plant Addr: </span><span id="info-plant" class="value"></span></div>
+    <div><span class="label">Ship Addr: </span><span id="info-ship" class="value"></span></div>
+    <div><span class="label">Outbound Delv.: </span><span id="info-vbeln" class="value"></span></div>
+    <div><span class="label">Item No.: </span><span id="info-posnr" class="value"></span></div>
+</div>
+
+<script type="text/javascript">
+    // ⚠ 실제 서비스에서는 브라우저에 노출하면 안 됨 (PoC 용)
+    const NCP_CLIENT_ID     = "rswlfafz91";
+    const NCP_CLIENT_SECRET = "DCJrXIjxWzzRXx3wJh0WOrKEeMb35yYbNGyknC7v";
+
+    let map;
+    let plantMarker = null;
+    let shipMarker  = null;
+    let routePolyline = null;
+
+    function getQueryParam(name) {
+        const params = new URLSearchParams(window.location.search);
+        return params.get(name);
+    }
+
+    function initMap() {
+        const defaultCenter = new naver.maps.LatLng(37.015349560501, 127.25072406298);
+
+        map = new naver.maps.Map('map', {
+            center: defaultCenter,
+            zoom: 10
+        });
+
+        // 파라미터 읽기
+        const plantAddr = getQueryParam('plantAddr');
+        const shipAddr  = getQueryParam('shipAddr');
+        const vbeln     = getQueryParam('vbeln');
+        const posnr     = getQueryParam('posnr');
+
+        // 좌측 상단 정보창에 표시
+        document.getElementById('info-plant').textContent = plantAddr || '';
+        document.getElementById('info-ship').textContent  = shipAddr || '';
+        document.getElementById('info-vbeln').textContent = vbeln || '';
+        document.getElementById('info-posnr').textContent = posnr || '';
+
+        if (plantAddr && shipAddr) {
+            geocodeBothAndRequestRoute(plantAddr, shipAddr);
+        } else {
+            // 주소 없으면 기본 마커만
+            new naver.maps.Marker({
+                map: map,
+                position: defaultCenter,
+                title: '기본 위치'
+            });
+        }
+    }
+
+    function geocodeBothAndRequestRoute(plantAddr, shipAddr) {
+        // 1) 공장 지오코딩
+        naver.maps.Service.geocode({ query: plantAddr }, function (status1, resp1) {
+            if (status1 !== naver.maps.Service.Status.OK || resp1.v2.meta.totalCount === 0) {
+                alert('공장 주소 지오코딩 실패\n' + plantAddr);
+                return;
+            }
+
+            const p = resp1.v2.addresses[0];
+            const plantLatLng = new naver.maps.LatLng(parseFloat(p.y), parseFloat(p.x));
+
+            // 2) 고객 지오코딩
+            naver.maps.Service.geocode({ query: shipAddr }, function (status2, resp2) {
+                if (status2 !== naver.maps.Service.Status.OK || resp2.v2.meta.totalCount === 0) {
+                    alert('고객 주소 지오코딩 실패\n' + shipAddr);
+                    return;
+                }
+
+                const s = resp2.v2.addresses[0];
+                const shipLatLng = new naver.maps.LatLng(parseFloat(s.y), parseFloat(s.x));
+
+                // 마커 표시
+                drawMarkers(plantLatLng, shipLatLng);
+
+                // Directions API 경로 요청
+                requestRouteFromDirectionsAPI(plantLatLng, shipLatLng);
+            });
+        });
+    }
+
+    function drawMarkers(plantLatLng, shipLatLng) {
+        if (!plantMarker) {
+            plantMarker = new naver.maps.Marker({
+                map: map,
+                position: plantLatLng,
+                title: 'Plant'
+            });
+        } else {
+            plantMarker.setPosition(plantLatLng);
+        }
+
+        if (!shipMarker) {
+            shipMarker = new naver.maps.Marker({
+                map: map,
+                position: shipLatLng,
+                title: 'Ship-to'
+            });
+        } else {
+            shipMarker.setPosition(shipLatLng);
+        }
+
+        const bounds = new naver.maps.LatLngBounds(plantLatLng, shipLatLng);
+        map.fitBounds(bounds);
+    }
+
+    async function requestRouteFromDirectionsAPI(plantLatLng, shipLatLng) {
+        const start = `${plantLatLng.lng()},${plantLatLng.lat()}`;
+        const goal  = `${shipLatLng.lng()},${shipLatLng.lat()}`;
+
+        const url = `https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving?start=${start}&goal=${goal}&option=traoptimal`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'X-NCP-APIGW-API-KEY-ID': NCP_CLIENT_ID,
+                    'X-NCP-APIGW-API-KEY': NCP_CLIENT_SECRET
+                }
+            });
+
+            if (!response.ok) {
+                alert('Directions API 호출 실패: ' + response.status);
+                return;
+            }
+
+            const data = await response.json();
+
+            if (data.code !== 0) {
+                alert('Directions API 오류: ' + data.message);
+                return;
+            }
+
+            const route = data.route.traoptimal[0];
+            const path  = route.path;  // [[lng, lat], ...]
+
+            const linePath = path.map(coord => new naver.maps.LatLng(coord[1], coord[0]));
+
+            if (routePolyline) {
+                routePolyline.setMap(null);
+            }
+
+            routePolyline = new naver.maps.Polyline({
+                map: map,
+                path: linePath,
+                strokeWeight: 5,
+                strokeColor: '#ff0000',
+                strokeOpacity: 0.9,
+                strokeStyle: 'solid'
+            });
+
+            map.fitBounds(linePath);
+
+        } catch (e) {
+            console.error(e);
+            alert('Directions API 호출 중 오류 발생');
+        }
+    }
+</script>
 </body>
 </html>
