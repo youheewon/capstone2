@@ -78,7 +78,19 @@
     const shipAddr  = getParam("shipAddr")  || "";
     const vbeln     = getParam("vbeln")     || "";
     const posnr     = getParam("posnr")     || "";
-    const routeStr  = getParam("route")     || "";
+    // const routeStr  = getParam("route")     || "";
+    let routeStr = "";
+    let hash = window.location.hash; // "#route=BASE64" 형태
+
+    if (hash.startsWith("#route=")) {
+        const base64 = hash.substring(7);
+        try{
+            routeStr = atob(base64); // BASE64 에서 기본 문자로 복구하기
+        } catch (e) {
+            console.error("Base64 decode Error: ", e);
+            routeStr = "";
+        }
+    }
 
     // 좌측 상단 패널에 값 표시
     document.getElementById("plantAddr").textContent = plantAddr;
