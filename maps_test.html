@@ -2,9 +2,9 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>Naver Map Route Viewer</title>
+  <title>Naver Direction5 Route (SAP ICF zns_direction5)</title>
 
-  <!-- 네이버 지도 JS (KeyId 버전 + geocoder 서브모듈) -->
+  <!-- 네이버 지도 JS (지오코더 submodule 사용) -->
   <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91&submodules=geocoder"></script>
 
   <style>
@@ -15,272 +15,239 @@
       font-family: Arial, "맑은 고딕", sans-serif;
     }
 
-    .container {
-      display: flex;
-      flex-direction: column;
+    #map {
+      width: 100%;
       height: 100%;
     }
 
-    .info-panel {
-      padding: 8px 12px;
-      border-bottom: 1px solid #ddd;
-      background-color: #f8f8f8;
-      font-size: 13px;
-      line-height: 1.4;
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 999;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+      min-width: 260px;
     }
 
-    .info-row {
-      margin-bottom: 2px;
-    }
-
-    .info-label {
+    #info .label {
       font-weight: bold;
-      margin-right: 4px;
+      display: inline-block;
+      width: 70px;
     }
 
-    #map {
-      flex: 1;
-      min-height: 400px;
+    #info-row {
+      margin-bottom: 4px;
+    }
+
+    #status-row {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    #status {
+      font-weight: bold;
+      color: #0064ff;
+      white-space: nowrap;
+    }
+
+    #info button {
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
-<div class="container">
-  <div class="info-panel">
-    <div class="info-row">
-      <span class="info-label">플랜트 주소:</span>
-      <span id="plantAddrText">-</span>
+  <div id="map"></div>
+
+  <!-- 상태/정보 패널 -->
+  <div id="info">
+    <div id="info-row">
+      <span class="label">출발(공장)</span>
+      <span id="plantAddress">-</span>
     </div>
-    <div class="info-row">
-      <span class="info-label">배송지 주소:</span>
-      <span id="shipAddrText">-</span>
+    <div id="info-row">
+      <span class="label">배송지(고객)</span>
+      <span id="customerAddress">-</span>
     </div>
-    <div class="info-row">
-      <span class="info-label">VBELN / POSNR:</span>
-      <span id="vbelnText">-</span>
+    <div id="info-row">
+      <span class="label">문서번호</span>
+      <span id="docNo">-</span>
+    </div>
+    <div id="info-row">
+      <span class="label">아이템</span>
+      <span id="itemNo">-</span>
+    </div>
+
+    <div id="status-row">
+      <span id="status">경로를 불러오는 중...</span>
+      <button type="button" onclick="reloadRoute()">다시 불러오기</button>
     </div>
   </div>
-  <div id="map"></div>
-</div>
 
-<script>
-  /**
-   * 해시(#) 영역에서 route 파라미터 가져오기
-   * 예: ...maps_test.html?plantAddr=...&shipAddr=...#route=BASE64값
-   */
-  function getRouteBase64FromHash() {
-    if (!window.location.hash) return null;
+  <script>
+    // SAP ICF 서비스 URL (필요하면 sap-client, host, port 추가)
+    // 예: const SAP_DIRECTION5_URL = "/sap/bc/zns_direction5?sap-client=100";
+    const SAP_DIRECTION5_URL = "/sap/bc/zns_direction5";
 
-    // '#route=xxx&...' -> 'route=xxx&...'
-    const hashWithoutSharp = window.location.hash.substring(1);
-    const hashParams = new URLSearchParams(hashWithoutSharp);
-    const routeBase64Encoded = hashParams.get("route");
+    let map;           // naver.maps.Map 인스턴스
+    let routeLine;     // Polyline
+    let startMarker;   // 출발 마커
+    let endMarker;     // 도착 마커
 
-    if (!routeBase64Encoded) return null;
-
-    // URL 인코딩된 Base64(%2B, %2F, %3D 등) 복원
-    return decodeURIComponent(routeBase64Encoded);
-  }
-
-  /**
-   * 쿼리스트링에서 plantAddr, shipAddr, vbeln, posnr 읽기
-   */
-  function getQueryParams() {
-    const params = new URLSearchParams(window.location.search);
-
-    return {
-      plantAddr: params.get("plantAddr") || "",
-      shipAddr: params.get("shipAddr") || "",
-      vbeln: params.get("vbeln") || "",
-      posnr: params.get("posnr") || ""
-    };
-  }
-
-  /**
-   * Base64 문자열 -> 원본 route 문자열 (lon,lat;lon,lat;...)
-   */
-  function decodeRouteString(base64Str) {
-    try {
-      // atob: Base64 -> 일반 문자열
-      return atob(base64Str);
-    } catch (e) {
-      console.error("Base64 디코딩 오류:", e);
-      return "";
-    }
-  }
-
-  /**
-   * "127.25,37.01;127.25,37.01;..." -> naver.maps.LatLng[] 경로 배열
-   * (lon,lat 순서이므로 LatLng(lat, lon) 으로 생성)
-   */
-  function parseRouteToLatLngArray(routeStr) {
-    if (!routeStr) return [];
-
-    const points = routeStr.split(";").filter(Boolean);
-    const path = [];
-
-    for (const p of points) {
-      const parts = p.split(",");
-      if (parts.length !== 2) continue;
-
-      const lon = parseFloat(parts[0]);
-      const lat = parseFloat(parts[1]);
-
-      if (isNaN(lat) || isNaN(lon)) continue;
-
-      path.push(new naver.maps.LatLng(lat, lon));
-    }
-
-    return path;
-  }
-
-  /**
-   * 주소 텍스트 패널 세팅
-   */
-  function setInfoPanel(plantAddr, shipAddr, vbeln, posnr) {
-    document.getElementById("plantAddrText").textContent = plantAddr || "-";
-    document.getElementById("shipAddrText").textContent = shipAddr || "-";
-
-    let vbelnPosText = "-";
-    if (vbeln) {
-      vbelnPosText = vbeln;
-      if (posnr) vbelnPosText += " / " + posnr;
-    } else if (posnr) {
-      vbelnPosText = posnr;
-    }
-    document.getElementById("vbelnText").textContent = vbelnPosText;
-  }
-
-  /**
-   * 주소 하나를 지오코딩해서 콜백으로 전달 (fallback용)
-   */
-  function geocodeSingleAddress(addr, callback) {
-    if (!addr) {
-      callback(null);
-      return;
-    }
-
-    naver.maps.Service.geocode({ query: addr }, function(status, response) {
-      if (status !== naver.maps.Service.Status.OK || !response.addresses || response.addresses.length === 0) {
-        console.warn("지오코딩 실패:", status, response);
-        callback(null);
-        return;
-      }
-
-      const item = response.addresses[0];
-      const lat = parseFloat(item.y);
-      const lon = parseFloat(item.x);
-
-      if (isNaN(lat) || isNaN(lon)) {
-        callback(null);
-        return;
-      }
-
-      callback(new naver.maps.LatLng(lat, lon));
-    });
-  }
-
-  /**
-   * 메인 초기화
-   */
-  function initMap() {
-    const { plantAddr, shipAddr, vbeln, posnr } = getQueryParams();
-    setInfoPanel(plantAddr, shipAddr, vbeln, posnr);
-
-    // 1) hash 영역에서 Base64 route 읽기
-    const routeBase64 = getRouteBase64FromHash();
-    let path = [];
-
-    if (routeBase64) {
-      const routeStr = decodeRouteString(routeBase64);
-      path = parseRouteToLatLngArray(routeStr);
-    }
-
-    // 2) 기본 지도 옵션
-    let mapCenter = new naver.maps.LatLng(37.5665, 126.9780); // 서울 시청 근처 (fallback)
-    let mapZoom = 12;
-
-    if (path.length > 0) {
-      // 경로가 있으면 첫 점을 중심으로
-      mapCenter = path[0];
-      mapZoom = 13;
-    }
-
-    const map = new naver.maps.Map('map', {
-      center: mapCenter,
-      zoom: mapZoom
-    });
-
-    // 3) 경로가 있으면 Polyline + 시작/끝 마커
-    if (path.length > 0) {
-      // Polyline
-      const polyline = new naver.maps.Polyline({
-        map: map,
-        path: path,
-        strokeWeight: 4,
-        strokeOpacity: 0.9,
-        strokeColor: '#1f8a70' // 경로 색 (원하면 변경 가능)
+    // 페이지 로드시 실행
+    window.onload = function () {
+      // 대충 서울 중심으로 초기화 (데이터 오면 fitBounds로 재조정)
+      map = new naver.maps.Map("map", {
+        center: new naver.maps.LatLng(37.5665, 126.9780),
+        zoom: 10
       });
 
-      // 시작/끝 마커
-      const startLatLng = path[0];
-      const endLatLng = path[path.length - 1];
+      loadRouteFromSap();
+    };
 
-      new naver.maps.Marker({
+    // SAP ICF(zns_direction5)에서 JSON 받아오기
+    async function loadRouteFromSap() {
+      setStatus("경로를 불러오는 중...");
+
+      try {
+        const response = await fetch(SAP_DIRECTION5_URL, {
+          method: "GET",
+          headers: {
+            "Accept": "application/json"
+          },
+          credentials: "include" // SAP 세션 쿠키 포함
+        });
+
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status + " " + response.statusText);
+        }
+
+        const data = await response.json();
+
+        updateInfoPanel(data);
+        drawRouteOnMap(data);
+
+        setStatus("경로 로딩 완료");
+      } catch (err) {
+        console.error(err);
+        setStatus("경로 로드 실패");
+        alert("SAP 서비스(zns_direction5) 호출 실패: " + err.message);
+      }
+    }
+
+    function reloadRoute() {
+      loadRouteFromSap();
+    }
+
+    function setStatus(text) {
+      const el = document.getElementById("status");
+      if (el) el.textContent = text;
+    }
+
+    // 상단 정보 패널에 값 세팅
+    function updateInfoPanel(data) {
+      // 여러 이름 케이스 지원 (ABAP JSON 키를 어떻게 주든 어느 정도 커버하려고)
+      const plantAddr =
+        data.plant_address ||
+        data.PLANT_ADDRESS ||
+        data.plantAddr ||
+        data.factory_address ||
+        data.FACTORY_ADDRESS ||
+        "";
+
+      const custAddr =
+        data.customer_address ||
+        data.CUSTOMER_ADDRESS ||
+        data.customerAddr ||
+        data.shipto_address ||
+        data.SHIPTO_ADDRESS ||
+        "";
+
+      const docNo =
+        data.doc_no ||
+        data.DOC_NO ||
+        data.vbeln ||
+        data.VBELN ||
+        "";
+
+      const itemNo =
+        data.item_no ||
+        data.ITEM_NO ||
+        data.posnr ||
+        data.POSNR ||
+        "";
+
+      document.getElementById("plantAddress").textContent = plantAddr || "-";
+      document.getElementById("customerAddress").textContent = custAddr || "-";
+      document.getElementById("docNo").textContent = docNo || "-";
+      document.getElementById("itemNo").textContent = itemNo || "-";
+    }
+
+    // JSON 데이터를 이용해서 지도에 경로, 마커 표시
+    function drawRouteOnMap(data) {
+      // data.path: [[x,y], [x,y], ...]  (x=경도, y=위도)
+      if (!data || !Array.isArray(data.path) || data.path.length === 0) {
+        alert("경로 데이터(path)가 없습니다.");
+        return;
+      }
+
+      const pathLatLng = data.path.map(function (p) {
+        const x = p[0]; // longitude
+        const y = p[1]; // latitude
+        return new naver.maps.LatLng(y, x);
+      });
+
+      // 이전 폴리라인/마커 제거
+      if (routeLine) routeLine.setMap(null);
+      if (startMarker) startMarker.setMap(null);
+      if (endMarker) endMarker.setMap(null);
+
+      // 폴리라인
+      routeLine = new naver.maps.Polyline({
+        map: map,
+        path: pathLatLng,
+        strokeWeight: 5,
+        strokeOpacity: 0.9,
+        strokeColor: "#FF0000"
+      });
+
+      // 출발/도착 좌표 (없으면 path 첫/마지막 점 사용)
+      const startLatLng = data.start
+        ? new naver.maps.LatLng(data.start.lat, data.start.lng)
+        : pathLatLng[0];
+
+      const endLatLng = data.end
+        ? new naver.maps.LatLng(data.end.lat, data.end.lng)
+        : pathLatLng[pathLatLng.length - 1];
+
+      startMarker = new naver.maps.Marker({
         map: map,
         position: startLatLng,
-        title: '출발지 (Plant)'
+        title: data.start_label || "출발"
       });
 
-      new naver.maps.Marker({
+      endMarker = new naver.maps.Marker({
         map: map,
         position: endLatLng,
-        title: '도착지 (Ship-to)'
+        title: data.end_label || "도착"
       });
 
-      // 경로 전체가 보이도록 bounds 맞추기
-      const bounds = new naver.maps.LatLngBounds();
-      path.forEach(function (latlng) { bounds.extend(latlng); });
+      // 경로 전체 보이도록
+      const bounds = new naver.maps.LatLngBounds(startLatLng, startLatLng);
+      pathLatLng.forEach(function (latLng) {
+        bounds.extend(latLng);
+      });
+      bounds.extend(endLatLng);
       map.fitBounds(bounds);
-
-    } else {
-      // 4) route가 없는 경우: shipAddr 또는 plantAddr 지오코딩해서 센터
-      if (shipAddr) {
-        geocodeSingleAddress(shipAddr, function(latlng) {
-          if (!latlng) return;
-          map.setCenter(latlng);
-          map.setZoom(14);
-
-          new naver.maps.Marker({
-            map: map,
-            position: latlng,
-            title: '배송지 (Ship-to)'
-          });
-        });
-      } else if (plantAddr) {
-        geocodeSingleAddress(plantAddr, function(latlng) {
-          if (!latlng) return;
-          map.setCenter(latlng);
-          map.setZoom(14);
-
-          new naver.maps.Marker({
-            map: map,
-            position: latlng,
-            title: '플랜트 (Plant)'
-          });
-        });
-      }
     }
-  }
-
-  // 네이버 스크립트 로드 후 실행
-  if (document.readyState === "complete" || document.readyState === "interactive") {
-    naver.maps.onJSContentLoaded = initMap;
-  } else {
-    document.addEventListener("DOMContentLoaded", function () {
-      naver.maps.onJSContentLoaded = initMap;
-    });
-  }
-</script>
+  </script>
 </body>
 </html>
