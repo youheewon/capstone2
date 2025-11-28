@@ -41,7 +41,16 @@
         }
     </style>
 
-    <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91"></script>
+    <!-- 🔥 maps.js 로드 전에 hash 제거 (validatev3 URI 문제 방지) -->
+    <script>
+        if (location.hash) {
+            history.replaceState(null, "", location.pathname + location.search);
+        }
+    </script>
+
+    <!-- 네이버 지도 JS -->
+    <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91&submodules=geocoder"></script>
+
 </head>
 <body>
 
@@ -68,37 +77,37 @@
 </div>
 
 <script>
-    // URL 파라미터 읽기
+    /* URL 파라미터 읽기 */
     function getParam(name) {
         return new URLSearchParams(window.location.search).get(name);
     }
 
-    // 파라미터 값 가져오기
     const plantAddr = getParam("plantAddr") || "";
     const shipAddr  = getParam("shipAddr")  || "";
     const vbeln     = getParam("vbeln")     || "";
     const posnr     = getParam("posnr")     || "";
-    // const routeStr  = getParam("route")     || "";
-    let routeStr = "";
-    let hash = window.location.hash; // "#route=BASE64" 형태
 
-    if (hash.startsWith("#route=")) {
-        const base64 = hash.substring(7);
-        try{
-            routeStr = atob(base64); // BASE64 에서 기본 문자로 복구하기
-        } catch (e) {
-            console.error("Base64 decode Error: ", e);
-            routeStr = "";
-        }
-    }
-
-    // 좌측 상단 패널에 값 표시
+    /* 좌측 패널 표시 */
     document.getElementById("plantAddr").textContent = plantAddr;
     document.getElementById("shipAddr").textContent  = shipAddr;
     document.getElementById("vbeln").textContent     = vbeln;
     document.getElementById("posnr").textContent     = posnr;
 
-    // route 문자열 → LatLng 배열로 변환
+    /* 🔥 해시(#route=BASE64)에서 route 복원 */
+    let routeStr = "";
+    let hash = window.location.hash;
+
+    if (hash.startsWith("#route=")) {
+        const base64 = hash.substring(7);
+        try {
+            routeStr = atob(base64);  // Base64 → 원본 "lng,lat;lng,lat;..."
+        } catch (e) {
+            console.error("Base64 decode error:", e);
+            routeStr = "";
+        }
+    }
+
+    /* route 문자열 → LatLng 배열 */
     function parseRoute(routeStr) {
         if (!routeStr) return [];
 
@@ -113,21 +122,20 @@
             const lng = parseFloat(parts[0]);
             const lat = parseFloat(parts[1]);
 
-            if (isNaN(lat) || isNaN(lng)) continue;
-
-            // LatLng 생성자는 (lat, lng) 순서!
-            path.push(new naver.maps.LatLng(lat, lng));
+            if (!isNaN(lat) && !isNaN(lng)) {
+                path.push(new naver.maps.LatLng(lat, lng));
+            }
         }
+
         return path;
     }
 
     const linePath = parseRoute(routeStr);
 
-    // 지도 초기화
+    /* 지도 초기화 */
     let map;
 
     function initMap() {
-        // 경로가 없으면 기본 좌표(서울 시청 근처)로
         let center = new naver.maps.LatLng(37.5666102, 126.9783881);
 
         if (linePath.length > 0) {
@@ -140,7 +148,6 @@
             mapTypeControl: true
         });
 
-        // 경로가 있다면 Polyline 그리기
         if (linePath.length > 0) {
             const polyline = new naver.maps.Polyline({
                 map: map,
@@ -150,7 +157,6 @@
                 strokeOpacity: 0.9
             });
 
-            // 시작점 / 끝점 마커
             const startLatLng = linePath[0];
             const endLatLng   = linePath[linePath.length - 1];
 
@@ -164,34 +170,32 @@
                 position: endLatLng
             });
 
-            // InfoWindow: 공장 / 고객 주소
             const startInfo = new naver.maps.InfoWindow({
-                content: '<div style="font-size:12px;padding:5px 8px;">'
-                       + '<b>Plant</b><br>' + (plantAddr || 'N/A') + '</div>'
+                content:
+                    '<div style="font-size:12px;padding:5px 8px;">' +
+                    '<b>Plant</b><br>' + plantAddr + '</div>'
             });
 
             const endInfo = new naver.maps.InfoWindow({
-                content: '<div style="font-size:12px;padding:5px 8px;">'
-                       + '<b>Customer</b><br>' + (shipAddr || 'N/A') + '</div>'
+                content:
+                    '<div style="font-size:12px;padding:5px 8px;">' +
+                    '<b>Customer</b><br>' + shipAddr + '</div>'
             });
 
             startInfo.open(map, startMarker);
             endInfo.open(map, endMarker);
 
-            // 전체 경로가 한 화면에 나오도록 bounds 조정
             const bounds = new naver.maps.LatLngBounds();
-            linePath.forEach(function (latlng) {
-                bounds.extend(latlng);
-            });
+            linePath.forEach(latlng => bounds.extend(latlng));
             map.fitBounds(bounds);
         }
     }
 
-    // 지도 스크립트 로드 후 initMap 실행
-    if (document.readyState === 'complete') {
+    /* 지도 생성 */
+    if (document.readyState === "complete") {
         initMap();
     } else {
-        window.addEventListener('load', initMap);
+        window.addEventListener("load", initMap);
     }
 </script>
 
