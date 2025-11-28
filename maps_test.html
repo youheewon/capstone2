@@ -77,129 +77,115 @@
 </div>
 
 <script>
-    /* URL 파라미터 읽기 */
-    function getParam(name) {
-        return new URLSearchParams(window.location.search).get(name);
+    // 1) ? 뒤 쿼리스트링 param 읽기
+    function getQueryParam(name) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(name);
     }
 
-    const plantAddr = getParam("plantAddr") || "";
-    const shipAddr  = getParam("shipAddr")  || "";
-    const vbeln     = getParam("vbeln")     || "";
-    const posnr     = getParam("posnr")     || "";
-
-    /* 좌측 패널 표시 */
-    document.getElementById("plantAddr").textContent = plantAddr;
-    document.getElementById("shipAddr").textContent  = shipAddr;
-    document.getElementById("vbeln").textContent     = vbeln;
-    document.getElementById("posnr").textContent     = posnr;
-
-    /* 🔥 해시(#route=BASE64)에서 route 복원 */
-    let routeStr = "";
-    let hash = window.location.hash;
-
-    if (hash.startsWith("#route=")) {
-        const base64 = hash.substring(7);
-        try {
-            routeStr = atob(base64);  // Base64 → 원본 "lng,lat;lng,lat;..."
-        } catch (e) {
-            console.error("Base64 decode error:", e);
-            routeStr = "";
-        }
+    // 2) # 뒤 hash에서 param 읽기 (route)
+    function getHashParam(name) {
+      const hash = window.location.hash; // 예: "#route=AAAA&x=1"
+      if (!hash || hash.length < 2) return null;
+      const hashString = hash.substring(1);    // "route=AAAA&x=1"
+      const params = new URLSearchParams(hashString);
+      return params.get(name);
     }
 
-    /* route 문자열 → LatLng 배열 */
+    // 3) "127.1,37.1;127.2,37.2;..." → LatLng 배열로 변환
     function parseRoute(routeStr) {
-        if (!routeStr) return [];
+      if (!routeStr) return [];
 
-        const segments = routeStr.split(";");
-        const path = [];
+      const clean = routeStr
+        .replace(/\s+/g, "")     // 공백/개행 제거
+        .replace(/;;+/g, ";")    // ;; → ;
+        .replace(/;$/, "");      // 끝 ; 제거
 
-        for (let seg of segments) {
-            if (!seg) continue;
-            const parts = seg.split(",");
-            if (parts.length !== 2) continue;
+      const segments = clean.split(";");
+      const path = [];
 
-            const lng = parseFloat(parts[0]);
-            const lat = parseFloat(parts[1]);
+      for (let seg of segments) {
+        if (!seg) continue;
+        const parts = seg.split(",");
+        if (parts.length !== 2) continue;
 
-            if (!isNaN(lat) && !isNaN(lng)) {
-                path.push(new naver.maps.LatLng(lat, lng));
-            }
+        const lng = parseFloat(parts[0]);
+        const lat = parseFloat(parts[1]);
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+          path.push(new naver.maps.LatLng(lat, lng));
         }
+      }
 
-        return path;
+      return path;
     }
-
-    const linePath = parseRoute(routeStr);
-
-    /* 지도 초기화 */
-    let map;
 
     function initMap() {
-        let center = new naver.maps.LatLng(37.5666102, 126.9783881);
+      const plantAddr = getQueryParam("plantAddr");
+      const shipAddr  = getQueryParam("shipAddr");
+      const vbeln     = getQueryParam("vbeln");
+      const posnr     = getQueryParam("posnr");
 
-        if (linePath.length > 0) {
-            center = linePath[Math.floor(linePath.length / 2)];
+      // hash에서 BASE64 route 읽기
+      const routeBase64 = getHashParam("route");
+      console.log("routeBase64 from hash:", routeBase64);
+
+      let routeStr = null;
+      if (routeBase64) {
+        try {
+          routeStr = atob(routeBase64);
+          console.log("decoded routeStr:", routeStr);
+        } catch (e) {
+          console.error("atob failed:", e);
         }
+      }
 
-        map = new naver.maps.Map('map', {
-            center: center,
-            zoom: 10,
-            mapTypeControl: true
+      // 기본 지도
+      const map = new naver.maps.Map("map", {
+        center: new naver.maps.LatLng(37.5665, 126.9780), // 서울 중심
+        zoom: 10
+      });
+
+      // route가 있고, 파싱이 성공하면 경로 & 마커 출력
+      const linePath = parseRoute(routeStr);
+      console.log("linePath:", linePath);
+
+      if (linePath.length > 0) {
+        // Polyline
+        const polyline = new naver.maps.Polyline({
+          map: map,
+          path: linePath,
+          strokeWeight: 4,
+          strokeOpacity: 0.9
         });
 
-        if (linePath.length > 0) {
-            const polyline = new naver.maps.Polyline({
-                map: map,
-                path: linePath,
-                strokeColor: '#ff0000',
-                strokeWeight: 4,
-                strokeOpacity: 0.9
-            });
+        // 시작점 / 끝점 마커
+        const start = linePath[0];
+        const end   = linePath[linePath.length - 1];
 
-            const startLatLng = linePath[0];
-            const endLatLng   = linePath[linePath.length - 1];
+        new naver.maps.Marker({
+          map: map,
+          position: start,
+          title: plantAddr || "출발지"
+        });
 
-            const startMarker = new naver.maps.Marker({
-                map: map,
-                position: startLatLng
-            });
+        new naver.maps.Marker({
+          map: map,
+          position: end,
+          title: shipAddr || "도착지"
+        });
 
-            const endMarker = new naver.maps.Marker({
-                map: map,
-                position: endLatLng
-            });
-
-            const startInfo = new naver.maps.InfoWindow({
-                content:
-                    '<div style="font-size:12px;padding:5px 8px;">' +
-                    '<b>Plant</b><br>' + plantAddr + '</div>'
-            });
-
-            const endInfo = new naver.maps.InfoWindow({
-                content:
-                    '<div style="font-size:12px;padding:5px 8px;">' +
-                    '<b>Customer</b><br>' + shipAddr + '</div>'
-            });
-
-            startInfo.open(map, startMarker);
-            endInfo.open(map, endMarker);
-
-            const bounds = new naver.maps.LatLngBounds();
-            linePath.forEach(latlng => bounds.extend(latlng));
-            map.fitBounds(bounds);
-        }
+        // bounds 맞춰서 줌 조정
+        const bounds = new naver.maps.LatLngBounds();
+        linePath.forEach(p => bounds.extend(p));
+        map.fitBounds(bounds);
+      } else {
+        console.warn("linePath is empty. Check route base64 and parsing.");
+      }
     }
 
-    console.log("BASE64 route raw:", routeStr);
-    
-    /* 지도 생성 */
-    if (document.readyState === "complete") {
-        initMap();
-    } else {
-        window.addEventListener("load", initMap);
-    }
-</script>
-
+    // 지도 로드 후 initMap 실행
+    naver.maps.onJSContentLoaded = initMap;
+  </script>
 </body>
 </html>
