@@ -2,351 +2,468 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>Naver 지도 – SAP 배송 경로</title>
+  <title>Naver Direction5 – 배송 경로 조회</title>
 
-  <!-- 네이버 지도 스크립트 (사용자가 말한 버전 & 지오코더 서브모듈) -->
-  <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91&submodules=geocoder"></script>
+  <!-- 네이버 지도 v3 (지오코더 + Direction5) -->
+  <script src="https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=rswlfafz91&submodules=geocoder,direction5"></script>
 
   <style>
+    * {
+      box-sizing: border-box;
+      font-family: "Segoe UI", "맑은 고딕", sans-serif;
+    }
     body {
       margin: 0;
-      font-family: Arial, "맑은 고딕", sans-serif;
-      background-color: #f5f5f5;
-      color: #333;
+      padding: 0;
+      display: flex;
+      height: 100vh;
+      background-color: #f3f4f6;
     }
 
-    .container {
+    /* 왼쪽 : 지도 */
+    #map {
+      flex: 2;
+      min-width: 60%;
+      height: 100%;
+    }
+
+    /* 오른쪽 : 정보 / 상태창 */
+    #side-panel {
+      flex: 1;
+      min-width: 320px;
+      max-width: 480px;
+      padding: 16px;
+      background-color: #ffffff;
+      border-left: 1px solid #e5e7eb;
       display: flex;
       flex-direction: column;
-      height: 100vh;
+      gap: 12px;
     }
 
-    .status-panel {
-      padding: 12px 16px;
-      background-color: #ffffff;
-      border-bottom: 1px solid #ddd;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-      z-index: 10;
+    h1 {
+      margin: 0 0 4px 0;
+      font-size: 18px;
     }
-
-    .status-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 24px;
-      margin-bottom: 6px;
+    .section-title {
       font-size: 14px;
-    }
-
-    .status-label {
-      font-weight: bold;
-      margin-right: 4px;
-      color: #555;
-    }
-
-    .status-value {
-      color: #111;
-    }
-
-    .status-badge {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background-color: #e6f2ff;
-      font-size: 12px;
-      color: #005fcc;
-      margin-right: 8px;
-    }
-
-    .status-error {
-      margin-top: 4px;
-      font-size: 13px;
-      color: #c0392b;
-    }
-
-    .btn-row {
-      margin-top: 8px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-    }
-
-    button {
-      padding: 6px 12px;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-      background-color: #ffffff;
-      cursor: pointer;
-      font-size: 13px;
-    }
-
-    button:hover {
-      background-color: #f0f0f0;
-    }
-
-    #map {
-      flex: 1;
-      min-height: 300px;
-    }
-
-    .legend {
-      position: absolute;
-      right: 16px;
-      top: 16px;
-      background-color: rgba(255,255,255,0.9);
-      padding: 8px 10px;
-      border-radius: 4px;
-      font-size: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-      z-index: 20;
-    }
-
-    .legend-item {
+      font-weight: 600;
       margin-bottom: 4px;
+      color: #374151;
+    }
+
+    .field-group {
       display: flex;
-      align-items: center;
-      gap: 4px;
+      flex-direction: column;
+      margin-bottom: 6px;
     }
-
-    .marker-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-    }
-
-    .marker-start {
-      background-color: #2ecc71; /* 출발 */
-    }
-
-    .marker-end {
-      background-color: #e74c3c; /* 도착 */
-    }
-
-    .info-msg {
+    .field-group label {
       font-size: 12px;
-      color: #777;
+      color: #4b5563;
+      margin-bottom: 2px;
+    }
+    .field-group input {
+      font-size: 13px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid #d1d5db;
+      background-color: #f9fafb;
+    }
+
+    #summary {
+      font-size: 13px;
+      padding: 8px;
+      background-color: #f3f4ff;
+      border-radius: 6px;
+      border: 1px solid #e5e7ff;
+      white-space: pre-line;
+      min-height: 48px;
+    }
+
+    #status-box {
+      width: 100%;
+      flex: 1;
+      font-size: 12px;
+      font-family: Consolas, "Courier New", monospace;
+      padding: 6px;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+      background-color: #111827;
+      color: #e5e7eb;
+      resize: none;
+      white-space: pre;
+      overflow-y: auto;
+    }
+
+    #btn-container {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    button {
+      flex: 1;
+      padding: 8px 10px;
+      font-size: 13px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+    }
+    #btn-load {
+      background-color: #2563eb;
+      color: #ffffff;
+    }
+    #btn-reload {
+      background-color: #6b7280;
+      color: #ffffff;
     }
   </style>
 </head>
 <body>
-<div class="container">
-  <!-- 상태창 -->
-  <div class="status-panel">
-    <div class="status-row">
-      <span class="status-badge">배송 정보</span>
-      <span>
-        <span class="status-label">문서번호(VBELN):</span>
-        <span id="status-vbeln" class="status-value">-</span>
-      </span>
-      <span>
-        <span class="status-label">아이템번호(POSNR):</span>
-        <span id="status-posnr" class="status-value">-</span>
-      </span>
-    </div>
-
-    <div class="status-row">
-      <span>
-        <span class="status-label">출발지(공장 주소):</span>
-        <span id="status-plant" class="status-value">-</span>
-      </span>
-    </div>
-
-    <div class="status-row">
-      <span>
-        <span class="status-label">도착지(고객 주소):</span>
-        <span id="status-cust" class="status-value">-</span>
-      </span>
-    </div>
-
-    <div class="btn-row">
-      <button id="btn-reload">경로 다시 조회</button>
-      <span class="info-msg">
-        SAP ICF 서비스(<code>zns_direction5</code>)에서 Naver Direction5 JSON을 받아와 경로를 그립니다.
-      </span>
-    </div>
-
-    <div id="status-error" class="status-error"></div>
-  </div>
-
-  <!-- 지도 -->
+  <!-- 지도 영역 -->
   <div id="map"></div>
 
-  <!-- 범례 -->
-  <div class="legend">
-    <div class="legend-item">
-      <span class="marker-dot marker-start"></span> 출발지
+  <!-- 우측 패널 -->
+  <div id="side-panel">
+    <h1>배송 경로 조회 (Direction5)</h1>
+
+    <div class="section-title">기본 정보</div>
+
+    <div class="field-group">
+      <label for="vbeln">문서번호 (VBELN)</label>
+      <input id="vbeln" type="text" readonly />
     </div>
-    <div class="legend-item">
-      <span class="marker-dot marker-end"></span> 도착지
+
+    <div class="field-group">
+      <label for="posnr">아이템번호 (POSNR)</label>
+      <input id="posnr" type="text" readonly />
+    </div>
+
+    <div class="field-group">
+      <label for="plantAddr">공장 주소</label>
+      <input id="plantAddr" type="text" readonly />
+    </div>
+
+    <div class="field-group">
+      <label for="shipAddr">고객 주소</label>
+      <input id="shipAddr" type="text" readonly />
+    </div>
+
+    <div class="section-title">경로 요약</div>
+    <div id="summary">아직 경로를 조회하지 않았습니다.</div>
+
+    <div class="section-title">상태창</div>
+    <textarea id="status-box" readonly></textarea>
+
+    <div id="btn-container">
+      <button id="btn-load">경로 조회</button>
+      <button id="btn-reload">초기화 / 다시 그리기</button>
     </div>
   </div>
-</div>
 
-<script>
-  // TODO: 실제 SAP 서버 주소로 교체 (예: https://es3.yourdomain.com/sap/bc/zns_direction5)
-  // SAP 실패, 걍 NodeJS써서 로컬호스트에서 Direction5 호출 후 JSON 반환.
-  const SAP_DIRECTION5_URL = "http://localhost:3000/";
+  <script>
+    // ──────────────────────────────────────────────
+    // 1. 기본 설정 (NodeJS Direction5 프록시 사용)
+    // ──────────────────────────────────────────────
+    // 예: Node 서버 index.js에서
+    //     app.post("/direction5", ...) 로 구현한 경우
+    const DIRECTION5_PROXY_URL = "http://localhost:4000/direction5";
 
-  // URL 파라미터 파싱
-  const params = new URLSearchParams(window.location.search);
-  const vbeln = params.get("vbeln") || "";
-  const posnr = params.get("posnr") || "";
-  const plantAddr = params.get("plantAddr") || "";
-  const shipAddr = params.get("shipAddr") || "";
+    let map;
+    let routePolyline = null;
+    let startMarker = null;
+    let endMarker = null;
 
-  // 상태창 DOM
-  const elVbeln = document.getElementById("status-vbeln");
-  const elPosnr = document.getElementById("status-posnr");
-  const elPlant = document.getElementById("status-plant");
-  const elCust  = document.getElementById("status-cust");
-  const elError = document.getElementById("status-error");
-  const btnReload = document.getElementById("btn-reload");
+    const statusBox  = document.getElementById("status-box");
+    const summaryBox = document.getElementById("summary");
 
-  // 상태창 값 세팅
-  elVbeln.textContent = vbeln || "(없음)";
-  elPosnr.textContent = posnr || "(없음)";
-  elPlant.textContent = plantAddr || "(ABAP에서 plantAddr 파라미터로 넘겨주세요)";
-  elCust.textContent  = shipAddr  || "(ABAP에서 shipAddr 파라미터로 넘겨주세요)";
-
-  if (!vbeln || !posnr) {
-    elError.textContent = "문서번호(VBELN)와 아이템번호(POSNR)가 URL 파라미터로 넘어오지 않았습니다.";
-  }
-
-  // 네이버 지도 초기화
-  let map;
-  let routePolyline = null;
-  let startMarker = null;
-  let endMarker = null;
-
-  function initMap() {
-    // 일단 서울 시청 근처로 초기화 → 경로 로딩 후 실제 경로 기준으로 다시 맞춤
-    const center = new naver.maps.LatLng(37.5665, 126.9780);
-
-    map = new naver.maps.Map("map", {
-      center: center,
-      zoom: 12
-    });
-
-    // 페이지 로딩 시 바로 한번 경로 조회
-    if (vbeln && posnr) {
-      fetchRouteAndDraw();
-    }
-  }
-
-  // SAP ICF(zns_direction5)를 호출해서 Direction5 JSON 받아오기
-  async function fetchRouteAndDraw() {
-    elError.textContent = "";
-
-    if (!vbeln || !posnr) {
-      elError.textContent = "vbeln/posnr 값이 없어 경로를 조회할 수 없습니다.";
-      return;
+    function logStatus(message) {
+      const time = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+      statusBox.value += `[${time}] ${message}\n`;
+      statusBox.scrollTop = statusBox.scrollHeight;
     }
 
-    try {
-      // SAP 서비스에 vbeln, posnr 전달
-      const response = await fetch(SAP_DIRECTION5_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        // 필요하면 plantAddr, shipAddr도 같이 넘길 수 있음
-        body: JSON.stringify({
-          vbeln: vbeln,
-          posnr: posnr
-          // plantAddr: plantAddr,
-          // shipAddr: shipAddr
-        })
+    // URL 파라미터 읽기 (좌표 포함)
+    function getQueryParams() {
+      const params = new URLSearchParams(window.location.search);
+
+      return {
+        vbeln:     params.get("vbeln")     || "",
+        posnr:     params.get("posnr")     || "",
+        plantAddr: params.get("plantAddr") || params.get("plantaddr") || "",
+        shipAddr:  params.get("shipAddr")  || params.get("shipaddr")  || "",
+        startLat:  parseFloat(params.get("startLat")),
+        startLng:  parseFloat(params.get("startLng")),
+        destLat:   parseFloat(params.get("destLat")),
+        destLng:   parseFloat(params.get("destLng"))
+      };
+    }
+
+    function isValidCoord(lat, lng) {
+      return (
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        !Number.isNaN(lat) &&
+        !Number.isNaN(lng) &&
+        lat >= -90 && lat <= 90 &&
+        lng >= -180 && lng <= 180
+      );
+    }
+
+    // 폼에 URL 파라미터 채우기
+    function fillHeaderFields() {
+      const {
+        vbeln,
+        posnr,
+        plantAddr,
+        shipAddr,
+        startLat,
+        startLng,
+        destLat,
+        destLng
+      } = getQueryParams();
+
+      document.getElementById("vbeln").value     = vbeln;
+      document.getElementById("posnr").value     = posnr;
+      document.getElementById("plantAddr").value = decodeURIComponent(plantAddr);
+      document.getElementById("shipAddr").value  = decodeURIComponent(shipAddr);
+
+      logStatus(`초기 파라미터 – VBELN: ${vbeln}, POSNR: ${posnr}`);
+      logStatus(`공장 주소: ${decodeURIComponent(plantAddr)}`);
+      logStatus(`고객 주소: ${decodeURIComponent(shipAddr)}`);
+
+      if (!isValidCoord(startLat, startLng) || !isValidCoord(destLat, destLng)) {
+        logStatus("⚠ startLat/startLng 또는 destLat/destLng가 없거나 잘못됨.");
+      } else {
+        logStatus(
+          `좌표 – start(${startLat}, ${startLng}), dest(${destLat}, ${destLng})`
+        );
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    // 2. 지도 초기화
+    // ──────────────────────────────────────────────
+    function initMap() {
+      const { startLat, startLng, destLat, destLng } = getQueryParams();
+
+      let center;
+      if (isValidCoord(startLat, startLng) && isValidCoord(destLat, destLng)) {
+        const midLat = (startLat + destLat) / 2;
+        const midLng = (startLng + destLng) / 2;
+        center = new naver.maps.LatLng(midLat, midLng);
+      } else {
+        center = new naver.maps.LatLng(37.5665, 126.9780); // 서울 시청
+      }
+
+      map = new naver.maps.Map("map", {
+        center: center,
+        zoom: 12
       });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error("SAP 서비스 호출 실패: " + response.status + " / " + text);
+      logStatus("네이버 지도 초기화 완료.");
+    }
+
+    // ──────────────────────────────────────────────
+    // 3. NodeJS Direction5 프록시 호출
+    //    (start/dest 좌표를 body로 넘김)
+    // ──────────────────────────────────────────────
+    async function callDirection5Proxy() {
+      const {
+        vbeln,
+        posnr,
+        startLat,
+        startLng,
+        destLat,
+        destLng
+      } = getQueryParams();
+
+      if (!vbeln || !posnr) {
+        logStatus("❌ VBELN / POSNR 파라미터가 비어 있음.");
+        alert("VBELN / POSNR 이 URL 파라미터로 넘어와야 합니다.");
+        return;
       }
 
-      const data = await response.json();
-
-      // ZCL_NAVER_DIRECTION5에서 Direction5 원본 JSON을 그대로 넘긴다고 가정:
-      // data.route.trafast[0].path => [[x,y], [x,y], ...] 형식
-      if (!data.route || !data.route.trafast || !data.route.trafast[0]) {
-        throw new Error("Direction5 응답 형식이 예상과 다릅니다.");
+      if (!isValidCoord(startLat, startLng) || !isValidCoord(destLat, destLng)) {
+        logStatus("❌ 좌표 정보(startLat/startLng, destLat/destLng)가 유효하지 않음.");
+        alert("출발/도착 좌표(startLat, startLng, destLat, destLng)가 필요합니다.");
+        return;
       }
 
-      const path = data.route.trafast[0].path; // [[x,y], ...]
-      drawRoute(path);
-    } catch (e) {
-      console.error(e);
-      elError.textContent = e.message;
+      logStatus(
+        `Direction5 프록시 호출 준비 – start(${startLat},${startLng}) → dest(${destLat},${destLng})`
+      );
+
+      try {
+        const response = await fetch(DIRECTION5_PROXY_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          // Node 서버에서 기대하는 body 예:
+          // { start: { lat, lng }, goal: { lat, lng }, option: "trafast" }
+          body: JSON.stringify({
+            start: { lat: startLat, lng: startLng },
+            goal:  { lat: destLat,  lng: destLng  },
+            option: "trafast"
+          })
+        });
+
+        if (!response.ok) {
+          const txt = await response.text();
+          logStatus(`❌ Direction5 프록시 HTTP ${response.status}: ${txt}`);
+          alert("Direction5 프록시 호출 실패. 상태창을 확인하세요.");
+          return;
+        }
+
+        const data = await response.json();
+        logStatus("Direction5 프록시 응답 수신 완료.");
+
+        // Naver Direction5 응답 형식:
+        // data.route.trafast[0].path : [[x,y], [x,y], ...]
+        if (!data.route || !data.route.trafast || !data.route.trafast[0]) {
+          logStatus("❌ 응답에 route.trafast[0]가 없음.");
+          alert("Direction5 응답 형식이 예상과 다릅니다.");
+          return;
+        }
+
+        const routeObj = data.route.trafast[0];
+        const path = routeObj.path || [];
+        const summary = {
+          distance: routeObj.summary?.distance,
+          duration: routeObj.summary?.duration,
+          startName: routeObj.summary?.start?.name,
+          endName: routeObj.summary?.goal?.name
+        };
+
+        drawRouteOnMap(path);
+        updateSummary(summary);
+      } catch (err) {
+        console.error(err);
+        logStatus(`❌ Direction5 프록시 호출 오류: ${err.message}`);
+        alert("Direction5 프록시 호출 중 오류가 발생했습니다.\n상태창을 확인하세요.");
+      }
     }
-  }
 
-  // 경로를 지도에 그리기
-  function drawRoute(path) {
-    if (!Array.isArray(path) || path.length === 0) {
-      elError.textContent = "경로 데이터(path)가 비어 있습니다.";
-      return;
+    // ──────────────────────────────────────────────
+    // 4. 지도에 경로 그리기
+    //  - path: [[lon,lat], [lon,lat], ...]
+    // ──────────────────────────────────────────────
+    function drawRouteOnMap(path) {
+      if (!Array.isArray(path) || path.length === 0) {
+        logStatus("❌ path 데이터가 비어 있음.");
+        return;
+      }
+
+      // 기존 경로 / 마커 삭제
+      if (routePolyline) {
+        routePolyline.setMap(null);
+        routePolyline = null;
+      }
+      if (startMarker) {
+        startMarker.setMap(null);
+        startMarker = null;
+      }
+      if (endMarker) {
+        endMarker.setMap(null);
+        endMarker = null;
+      }
+
+      const latLngPath = path.map(function (p) {
+        // p = [lon, lat]
+        const lon = p[0];
+        const lat = p[1];
+        return new naver.maps.LatLng(lat, lon);
+      });
+
+      // Polyline
+      routePolyline = new naver.maps.Polyline({
+        map: map,
+        path: latLngPath,
+        strokeWeight: 5,
+        strokeOpacity: 0.9
+      });
+
+      // 시작/끝 마커
+      startMarker = new naver.maps.Marker({
+        map: map,
+        position: latLngPath[0],
+        title: "출발지"
+      });
+
+      endMarker = new naver.maps.Marker({
+        map: map,
+        position: latLngPath[latLngPath.length - 1],
+        title: "도착지"
+      });
+
+      // 전체 경로가 보이게 범위 조정
+      const bounds = new naver.maps.LatLngBounds();
+      latLngPath.forEach(function (latLng) {
+        bounds.extend(latLng);
+      });
+      map.fitBounds(bounds);
+
+      logStatus(`경로 그리기 완료. 좌표 개수: ${latLngPath.length}`);
     }
 
-    // 기존 라인/마커 제거
-    if (routePolyline) {
-      routePolyline.setMap(null);
+    // ──────────────────────────────────────────────
+    // 5. 요약 영역 업데이트
+    //  - summary: { distance, duration, startName, endName }
+    // ──────────────────────────────────────────────
+    function updateSummary(summary) {
+      const distanceM = summary.distance || 0;
+      const durationS = summary.duration || 0;
+
+      const distanceKm = (distanceM / 1000).toFixed(2);
+      const minutes = Math.floor(durationS / 60);
+      const seconds = durationS % 60;
+
+      const startName =
+        summary.startName || document.getElementById("plantAddr").value || "(출발지)";
+      const endName =
+        summary.endName   || document.getElementById("shipAddr").value  || "(도착지)";
+
+      const text =
+        `출발지 : ${startName}\n` +
+        `도착지 : ${endName}\n` +
+        `거리   : ${distanceKm} km (${distanceM} m)\n` +
+        `예상 소요 시간 : ${minutes}분 ${seconds}초`;
+
+      summaryBox.textContent = text;
+      logStatus("경로 요약정보 갱신 완료.");
     }
-    if (startMarker) {
-      startMarker.setMap(null);
-    }
-    if (endMarker) {
-      endMarker.setMap(null);
-    }
 
-    // Direction5 path: [x, y] = [lng, lat]
-    const latlngs = path.map(function (p) {
-      return new naver.maps.LatLng(p[1], p[0]);
+    // ──────────────────────────────────────────────
+    // 6. 초기 로딩
+    // ──────────────────────────────────────────────
+    document.addEventListener("DOMContentLoaded", function () {
+      fillHeaderFields();
+      initMap();
+
+      document.getElementById("btn-load").addEventListener("click", callDirection5Proxy);
+
+      document.getElementById("btn-reload").addEventListener("click", function () {
+        statusBox.value = "";
+        summaryBox.textContent = "아직 경로를 조회하지 않았습니다.";
+
+        if (routePolyline) {
+          routePolyline.setMap(null);
+          routePolyline = null;
+        }
+        if (startMarker) {
+          startMarker.setMap(null);
+          startMarker = null;
+        }
+        if (endMarker) {
+          endMarker.setMap(null);
+          endMarker = null;
+        }
+
+        logStatus("초기화 완료.");
+      });
+
+      // 필요하면 자동 조회
+      // callDirection5Proxy();
     });
-
-    // 폴리라인
-    routePolyline = new naver.maps.Polyline({
-      map: map,
-      path: latlngs,
-      strokeColor: "#ff5555",
-      strokeOpacity: 0.9,
-      strokeWeight: 4
-    });
-
-    // 시작 / 끝 마커
-    const startLatLng = latlngs[0];
-    const endLatLng = latlngs[latlngs.length - 1];
-
-    startMarker = new naver.maps.Marker({
-      position: startLatLng,
-      map: map,
-      title: "출발지"
-    });
-
-    endMarker = new naver.maps.Marker({
-      position: endLatLng,
-      map: map,
-      title: "도착지"
-    });
-
-    // 지도 범위 맞추기
-    const bounds = new naver.maps.LatLngBounds();
-    latlngs.forEach(function (ll) {
-      bounds.extend(ll);
-    });
-    map.fitBounds(bounds);
-  }
-
-  // 버튼: 경로 다시 조회
-  btnReload.addEventListener("click", function () {
-    fetchRouteAndDraw();
-  });
-
-  // 지도 준비 후 초기화
-  // 네이버 맵 스크립트 로드 완료 후 실행 보장용
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initMap);
-  } else {
-    initMap();
-  }
-</script>
+  </script>
 </body>
 </html>
